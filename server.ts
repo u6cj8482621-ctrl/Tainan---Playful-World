@@ -13,7 +13,9 @@ const db = new Database("travel.db");
 db.exec(`
   CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT DEFAULT '我的旅行'
+    name TEXT DEFAULT '我的旅行',
+    start_date TEXT,
+    end_date TEXT
   );
   CREATE TABLE IF NOT EXISTS day_dates (
     day INTEGER PRIMARY KEY,
@@ -55,8 +57,24 @@ async function startServer() {
   });
 
   app.put("/api/trip", (req, res) => {
-    const { name } = req.body;
-    db.prepare("UPDATE trips SET name = ? WHERE id = (SELECT id FROM trips LIMIT 1)").run(name);
+    const { name, start_date, end_date } = req.body;
+    if (name !== undefined) {
+      db.prepare("UPDATE trips SET name = ? WHERE id = (SELECT id FROM trips LIMIT 1)").run(name);
+    }
+    if (start_date !== undefined && end_date !== undefined) {
+      db.prepare("UPDATE trips SET start_date = ?, end_date = ? WHERE id = (SELECT id FROM trips LIMIT 1)").run(start_date, end_date);
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/day_dates/sync", (req, res) => {
+    const { dates } = req.body; // Array of { day, date }
+    db.prepare("DELETE FROM day_dates").run();
+    const insert = db.prepare("INSERT INTO day_dates (day, date) VALUES (?, ?)");
+    const transaction = db.transaction((data) => {
+      for (const item of data) insert.run(item.day, item.date);
+    });
+    transaction(dates);
     res.json({ success: true });
   });
 
