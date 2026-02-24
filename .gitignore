@@ -1,0 +1,4 @@
+node_modules
+dist
+travel.db
+.env
