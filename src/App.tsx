@@ -22,9 +22,16 @@ export default function App() {
   const [dayDates, setDayDates] = useState<DayDate[]>([]);
   const [currentDay, setCurrentDay] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDateModalOpen, setIsDateModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TravelEntry | null>(null);
+
+  // Date range state
+  const [dateRange, setDateRange] = useState({
+    start: '',
+    end: ''
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -46,9 +53,15 @@ export default function App() {
         fetch('/api/entries'),
         fetch('/api/day_dates')
       ]);
-      setTrip(await tripRes.json());
+      const tripData = await tripRes.json();
+      setTrip(tripData);
       setEntries(await entriesRes.json());
-      setDayDates(await datesRes.json());
+      const datesData = await datesRes.json();
+      setDayDates(datesData);
+      
+      if (tripData.start_date && tripData.end_date) {
+        setDateRange({ start: tripData.start_date, end: tripData.end_date });
+      }
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -56,14 +69,48 @@ export default function App() {
     }
   };
 
-  const updateDayDate = async (day: number, date: string) => {
-    const newDates = dayDates.map(d => d.day === day ? { ...d, date } : d);
-    setDayDates(newDates);
-    await fetch(`/api/day_dates/${day}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date }),
-    });
+  const updateTripDates = async () => {
+    if (!dateRange.start || !dateRange.end) return;
+    
+    const start = new Date(dateRange.start);
+    const end = new Date(dateRange.end);
+    
+    if (end < start) {
+      alert("結束日期不能早於開始日期");
+      return;
+    }
+
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    const newDayDates: DayDate[] = [];
+    for (let i = 0; i < diffDays; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      newDayDates.push({
+        day: i + 1,
+        date: d.toISOString().split('T')[0]
+      });
+    }
+
+    setDayDates(newDayDates);
+    setCurrentDay(1);
+
+    // Sync with server
+    await Promise.all([
+      fetch('/api/trip', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_date: dateRange.start, end_date: dateRange.end }),
+      }),
+      fetch('/api/day_dates/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dates: newDayDates }),
+      })
+    ]);
+
+    setIsDateModalOpen(false);
   };
 
   const searchLocation = async () => {
@@ -163,7 +210,6 @@ export default function App() {
   const getDayDateDisplay = (day: number) => {
     const dayDate = dayDates.find(d => d.day === day);
     if (!dayDate || !dayDate.date) return "";
-    // Display MM/DD
     const parts = dayDate.date.split("-");
     if (parts.length === 3) {
       return `${parts[1]}/${parts[2]}`;
@@ -174,7 +220,7 @@ export default function App() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-pulse text-stone-400 font-bold tracking-widest">LOADING...</div>
+        <div className="animate-pulse text-stone-400 font-bold tracking-widest">載入中...</div>
       </div>
     );
   }
@@ -184,6 +230,12 @@ export default function App() {
       {/* Header */}
       <header className="mb-8 space-y-6">
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsDateModalOpen(true)}
+            className="w-10 h-10 bg-stone-100 rounded-xl flex items-center justify-center text-stone-600 hover:bg-stone-200 transition-colors"
+          >
+            <Calendar size={20} />
+          </button>
           <input
             type="text"
             value={trip?.name || ''}
@@ -193,29 +245,21 @@ export default function App() {
           />
         </div>
 
-        {/* Horizontal Scrolling Date Picker */}
-        <div className="flex overflow-x-auto gap-3 pb-4 no-scrollbar">
-          {[1, 2, 3, 4, 5, 6, 7].map((day) => (
-            <div key={day} className="flex flex-col gap-2 items-center flex-shrink-0">
-              <button
-                onClick={() => setCurrentDay(day)}
-                className={`w-20 py-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-0.5 ${
-                  currentDay === day
-                    ? 'bg-stone-900 border-stone-900 text-white custom-shadow scale-105'
-                    : 'bg-white border-stone-200 text-stone-400 hover:border-stone-400'
-                }`}
-              >
-                <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Day</span>
-                <span className="text-2xl font-black leading-none">{day}</span>
-                <span className="text-[10px] font-bold mt-1">{getDayDateDisplay(day)}</span>
-              </button>
-              <input 
-                type="date"
-                value={dayDates.find(d => d.day === day)?.date || ""}
-                onChange={(e) => updateDayDate(day, e.target.value)}
-                className="w-full text-[10px] bg-white/50 border border-stone-200 rounded-md px-1 py-0.5 outline-none focus:border-stone-400 text-center"
-              />
-            </div>
+        {/* Horizontal Scrolling Date Picker - Flatter Style */}
+        <div className="flex overflow-x-auto gap-2 pb-2 no-scrollbar">
+          {dayDates.map((d) => (
+            <button
+              key={d.day}
+              onClick={() => setCurrentDay(d.day)}
+              className={`flex-shrink-0 px-4 py-2 rounded-xl border-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+                currentDay === d.day
+                  ? 'bg-stone-900 border-stone-900 text-white custom-shadow'
+                  : 'bg-white border-stone-200 text-stone-400 hover:border-stone-400'
+              }`}
+            >
+              <span className="text-xs font-black">Day {d.day}</span>
+              <span className="text-[10px] font-bold opacity-60">{getDayDateDisplay(d.day)}</span>
+            </button>
           ))}
         </div>
       </header>
@@ -304,7 +348,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Floating Action Button - Square with Rounded Corners */}
+      {/* Floating Action Button */}
       <button
         onClick={() => setIsModalOpen(true)}
         className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-stone-900 text-white px-12 py-5 rounded-2xl shadow-2xl hover:bg-stone-800 transition-all flex items-center gap-2 font-black active:scale-95 z-40 custom-shadow tracking-widest"
@@ -313,7 +357,61 @@ export default function App() {
         新增內容
       </button>
 
-      {/* Modal */}
+      {/* Date Range Modal */}
+      <AnimatePresence>
+        {isDateModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDateModalOpen(false)}
+              className="absolute inset-0 bg-stone-900/70 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="relative w-full max-w-sm bg-[#F7F4EB] rounded-[2rem] shadow-2xl overflow-hidden border border-stone-200"
+            >
+              <div className="p-5 border-b border-stone-200 flex items-center justify-between bg-white">
+                <h2 className="text-xl font-black text-stone-800 tracking-tight">設定旅行日期</h2>
+                <button onClick={() => setIsDateModalOpen(false)} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">開始日期</label>
+                  <input
+                    type="date"
+                    value={dateRange.start}
+                    onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                    className="w-full px-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">結束日期</label>
+                  <input
+                    type="date"
+                    value={dateRange.end}
+                    onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                    className="w-full px-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
+                  />
+                </div>
+                <button
+                  onClick={updateTripDates}
+                  className="w-full bg-stone-900 text-white py-4 rounded-xl font-black text-lg tracking-[0.2em] hover:bg-stone-800 transition-all custom-shadow mt-2"
+                >
+                  確認設定
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Entry Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
@@ -330,33 +428,33 @@ export default function App() {
               exit={{ opacity: 0, y: 100 }}
               className="relative w-full max-w-lg bg-[#F7F4EB] rounded-[2rem] shadow-2xl overflow-hidden border border-stone-200"
             >
-              <div className="p-5 border-b border-stone-200 flex items-center justify-between bg-white">
-                <h2 className="text-xl font-black text-stone-800 tracking-tight">
+              <div className="p-4 border-b border-stone-200 flex items-center justify-between bg-white">
+                <h2 className="text-lg font-black text-stone-800 tracking-tight">
                   {editingEntry ? "編輯行程內容" : "新增行程內容"}
                 </h2>
                 <button onClick={closeModal} className="p-2 hover:bg-stone-100 rounded-full transition-colors">
-                  <X size={24} />
+                  <X size={20} />
                 </button>
               </div>
 
-              <form onSubmit={handleSaveEntry} className="p-5 space-y-4">
+              <form onSubmit={handleSaveEntry} className="p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">時間</label>
                     <input
                       required
                       type="time"
                       value={formData.time}
                       onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                      className="w-full px-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none font-bold"
+                      className="w-full px-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">分類</label>
                     <select
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value as Category })}
-                      className="w-full px-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none appearance-none font-bold"
+                      className="w-full px-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none appearance-none font-bold"
                     >
                       {CATEGORIES.map((c) => (
                         <option key={c.label} value={c.label}>{c.icon} {c.label}</option>
@@ -365,60 +463,60 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">地點 (Google 搜尋)</label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <MapPin size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+                      <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
                       <input
                         required
                         type="text"
                         placeholder="要去哪裡？"
                         value={formData.location}
                         onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                        className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none font-bold"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={searchLocation}
                       disabled={isSearching || !formData.location}
-                      className="px-4 bg-stone-900 text-white rounded-2xl hover:bg-stone-800 transition-all disabled:opacity-50 flex items-center justify-center custom-shadow"
+                      className="px-3 bg-stone-900 text-white rounded-xl hover:bg-stone-800 transition-all disabled:opacity-50 flex items-center justify-center custom-shadow"
                     >
-                      {isSearching ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" /> : <Sparkles size={20} />}
+                      {isSearching ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Sparkles size={18} />}
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">內容描述</label>
                   <textarea
                     rows={2}
                     placeholder="寫點什麼吧..."
                     value={formData.content}
                     onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                    className="w-full px-4 py-3 bg-white border border-stone-200 rounded-2xl focus:ring-2 focus:ring-stone-900 focus:border-transparent outline-none resize-none font-medium"
+                    className="w-full px-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none resize-none font-medium text-sm"
                   />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">照片</label>
                   <div className="relative group">
                     {formData.image_url ? (
-                      <div className="relative aspect-[3/2] rounded-2xl overflow-hidden border border-stone-200 custom-shadow">
+                      <div className="relative aspect-[3/2] rounded-xl overflow-hidden border border-stone-200 custom-shadow">
                         <img src={formData.image_url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         <button
                           type="button"
                           onClick={() => setFormData({ ...formData, image_url: '' })}
-                          className="absolute top-3 right-3 p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                          className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
                         >
-                          <X size={18} />
+                          <X size={14} />
                         </button>
                       </div>
                     ) : (
-                      <label className="flex flex-col items-center justify-center aspect-[3/2] border-2 border-dashed border-stone-200 bg-white rounded-2xl cursor-pointer hover:bg-stone-50 hover:border-stone-300 transition-all">
-                        <Camera size={32} className="text-stone-300 mb-2" />
-                        <span className="text-xs text-stone-400 font-black tracking-widest">點擊上傳照片</span>
+                      <label className="flex flex-col items-center justify-center aspect-[3/2] border-2 border-dashed border-stone-200 bg-white rounded-xl cursor-pointer hover:bg-stone-50 transition-all">
+                        <Camera size={24} className="text-stone-300 mb-1" />
+                        <span className="text-[10px] text-stone-400 font-black tracking-widest">上傳照片</span>
                         <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                       </label>
                     )}
@@ -427,7 +525,7 @@ export default function App() {
 
                 <button
                   type="submit"
-                  className="w-full bg-stone-900 text-white py-4 rounded-xl font-black text-lg tracking-[0.2em] hover:bg-stone-800 transition-all active:scale-[0.98] custom-shadow"
+                  className="w-full bg-stone-900 text-white py-3.5 rounded-xl font-black text-base tracking-[0.2em] hover:bg-stone-800 transition-all active:scale-[0.98] custom-shadow"
                 >
                   {editingEntry ? "更新行程" : "儲存行程"}
                 </button>
