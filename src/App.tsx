@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { Plus, MapPin, Clock, Camera, Trash2, Bus, Utensils, Landmark, MoreHorizontal, X, Search, Sparkles, Edit2, Calendar, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, MapPin, Clock, Camera, Trash2, Bus, Utensils, Landmark, MoreHorizontal, X, Edit2, Calendar, ExternalLink, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trip, TravelEntry, Category, DayDate } from './types';
-import { GoogleGenAI } from "@google/genai";
 
 const CATEGORIES: { label: Category; icon: string; color: string }[] = [
   { label: '交通', icon: '🚙', color: 'bg-blue-50 text-blue-600 border-blue-200' },
@@ -24,8 +23,11 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
   const [editingEntry, setEditingEntry] = useState<TravelEntry | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  const autocompleteInputRef = useRef<HTMLInputElement>(null);
+  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
 
   // Date range state
   const [dateRange, setDateRange] = useState({
@@ -44,7 +46,36 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
+    loadGoogleMapsScript();
   }, []);
+
+  const loadGoogleMapsScript = () => {
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) return;
+
+    if (window.google) return;
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  };
+
+  useEffect(() => {
+    if (isModalOpen && window.google && autocompleteInputRef.current) {
+      autocompleteRef.current = new google.maps.places.Autocomplete(autocompleteInputRef.current, {
+        types: ['establishment', 'geocode'],
+      });
+
+      autocompleteRef.current.addListener('place_changed', () => {
+        const place = autocompleteRef.current?.getPlace();
+        if (place && place.name) {
+          setFormData(prev => ({ ...prev, location: place.name || '' }));
+        }
+      });
+    }
+  }, [isModalOpen]);
 
   const fetchData = async () => {
     try {
@@ -96,7 +127,6 @@ export default function App() {
     setDayDates(newDayDates);
     setCurrentDay(1);
 
-    // Sync with server
     await Promise.all([
       fetch('/api/trip', {
         method: 'PUT',
@@ -111,32 +141,6 @@ export default function App() {
     ]);
 
     setIsDateModalOpen(false);
-  };
-
-  const searchLocation = async () => {
-    if (!formData.location) return;
-    setIsSearching(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: `請幫我搜尋地點「${formData.location}」的詳細資訊，包含正確名稱和簡短描述。`,
-        config: {
-          tools: [{ googleMaps: {} }],
-        },
-      });
-
-      const text = response.text || '';
-      setFormData(prev => ({
-        ...prev,
-        location: text.split('\n')[0].replace(/[*#]/g, '').trim() || prev.location,
-        content: text.split('\n').slice(1).join('\n').trim() || prev.content
-      }));
-    } catch (error) {
-      console.error('AI Search failed:', error);
-    } finally {
-      setIsSearching(false);
-    }
   };
 
   const updateTripName = async (name: string) => {
@@ -226,7 +230,7 @@ export default function App() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 pb-32">
+    <div className="max-w-2xl mx-auto px-4 pt-16 pb-32 sm:pt-8">
       {/* Header */}
       <header className="mb-8 space-y-6">
         <div className="flex items-center gap-3">
@@ -245,7 +249,7 @@ export default function App() {
           />
         </div>
 
-        {/* Horizontal Scrolling Date Picker - Flatter Style */}
+        {/* Horizontal Scrolling Date Picker */}
         <div className="flex overflow-x-auto gap-2 pb-2 no-scrollbar">
           {dayDates.map((d) => (
             <button
@@ -282,13 +286,19 @@ export default function App() {
 
                 <div className="glass-card overflow-hidden group">
                   {entry.image_url && (
-                    <div className="aspect-[3/2] w-full overflow-hidden bg-stone-100 border-b border-stone-100">
+                    <div 
+                      className="aspect-[3/2] w-full overflow-hidden bg-stone-100 border-b border-stone-100 relative cursor-pointer"
+                      onClick={() => setSelectedImage(entry.image_url || null)}
+                    >
                       <img
                         src={entry.image_url}
                         alt={entry.location}
                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                         referrerPolicy="no-referrer"
                       />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <Maximize2 className="text-white opacity-0 group-hover:opacity-100 transition-opacity" size={24} />
+                      </div>
                     </div>
                   )}
                   <div className="p-5 space-y-3">
@@ -356,6 +366,30 @@ export default function App() {
         <Plus size={24} />
         新增內容
       </button>
+
+      {/* Image Lightbox */}
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"
+            onClick={() => setSelectedImage(null)}
+          >
+            <button className="absolute top-8 right-8 text-white p-2 hover:bg-white/10 rounded-full">
+              <X size={32} />
+            </button>
+            <motion.img 
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              src={selectedImage} 
+              className="max-w-full max-h-full object-contain rounded-lg" 
+              referrerPolicy="no-referrer"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Date Range Modal */}
       <AnimatePresence>
@@ -465,26 +499,17 @@ export default function App() {
 
                 <div className="space-y-0.5">
                   <label className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em]">地點 (Google 搜尋)</label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
-                      <input
-                        required
-                        type="text"
-                        placeholder="要去哪裡？"
-                        value={formData.location}
-                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={searchLocation}
-                      disabled={isSearching || !formData.location}
-                      className="px-3 bg-stone-900 text-white rounded-xl hover:bg-stone-800 transition-all disabled:opacity-50 flex items-center justify-center custom-shadow"
-                    >
-                      {isSearching ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" /> : <Sparkles size={18} />}
-                    </button>
+                  <div className="relative">
+                    <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+                    <input
+                      ref={autocompleteInputRef}
+                      required
+                      type="text"
+                      placeholder="要去哪裡？"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-stone-900 outline-none font-bold"
+                    />
                   </div>
                 </div>
 
