@@ -6,9 +6,31 @@
 }
 
 body {
-  @apply bg-stone-50 text-stone-900 antialiased;
+  background-color: #F7F4EB;
+  background-image: radial-gradient(#E0E5D5 1px, transparent 1px);
+  background-size: 20px 20px;
+  @apply text-stone-900 antialiased;
+}
+
+.custom-shadow {
+  box-shadow: 4px 4px 0px #E0E5D5;
+}
+
+.timeline-line {
+  @apply absolute left-6 top-0 bottom-0 w-0.5 bg-stone-300;
 }
 
 .glass-card {
-  @apply bg-white/80 backdrop-blur-sm border border-stone-200 shadow-sm;
+  @apply bg-white rounded-2xl border border-stone-200;
+  box-shadow: 4px 4px 0px #E0E5D5;
 }
+
+/* Hide scrollbar for horizontal scrolling date picker */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
