@@ -8,6 +8,7 @@ export interface TravelEntry {
   category: Category;
   content: string;
   image_url?: string;
+  coordinates?: string;
 }
 
 export interface Trip {
