@@ -13,6 +13,8 @@ export interface TravelEntry {
 export interface Trip {
   id: number;
   name: string;
+  start_date?: string;
+  end_date?: string;
 }
 
 export interface DayDate {
