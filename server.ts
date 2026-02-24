@@ -29,6 +29,7 @@ db.exec(`
     category TEXT,
     content TEXT,
     image_url TEXT,
+    coordinates TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
@@ -95,18 +96,18 @@ async function startServer() {
   });
 
   app.post("/api/entries", (req, res) => {
-    const { day, time, location, category, content, image_url } = req.body;
+    const { day, time, location, category, content, image_url, coordinates } = req.body;
     const result = db.prepare(
-      "INSERT INTO entries (day, time, location, category, content, image_url) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(day, time, location, category, content, image_url);
+      "INSERT INTO entries (day, time, location, category, content, image_url, coordinates) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(day, time, location, category, content, image_url, coordinates);
     res.json({ id: result.lastInsertRowid });
   });
 
   app.put("/api/entries/:id", (req, res) => {
-    const { time, location, category, content, image_url } = req.body;
+    const { time, location, category, content, image_url, coordinates } = req.body;
     db.prepare(
-      "UPDATE entries SET time = ?, location = ?, category = ?, content = ?, image_url = ? WHERE id = ?"
-    ).run(time, location, category, content, image_url, req.params.id);
+      "UPDATE entries SET time = ?, location = ?, category = ?, content = ?, image_url = ?, coordinates = ? WHERE id = ?"
+    ).run(time, location, category, content, image_url, coordinates, req.params.id);
     res.json({ success: true });
   });
 
