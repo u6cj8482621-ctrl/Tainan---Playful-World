@@ -14,3 +14,8 @@ export interface Trip {
   id: number;
   name: string;
 }
+
+export interface DayDate {
+  day: number;
+  date: string;
+}
